@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TechShop — Loja de Tecnologia</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── RESET & TOKENS ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0b0c10;
+      --surface:   #12141a;
+      --card:      #1a1d26;
+      --border:    #2a2d3a;
+      --accent:    #e63946;
+      --accent2:   #ff6b6b;
+      --gold:      #ffd166;
+      --text:      #f0f0f0;
+      --muted:     #7a7f94;
+      --green:     #06d6a0;
+      --font-head: 'Syne', sans-serif;
+      --font-body: 'DM Sans', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── NOISE TEXTURE OVERLAY ──────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 9999;
+      opacity: 0.4;
+    }
+
+    /* ── ALERT BANNER (XSS output) ─────────────────────── */
+    .vuln-banner {
+      background: linear-gradient(135deg, #2d0a0a, #1a0505);
+      border-bottom: 2px solid var(--accent);
+      padding: 10px 24px;
+      font-size: 13px;
+      color: #ff9999;
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    .vuln-banner.show { display: flex; }
+    .vuln-banner strong { color: var(--accent); font-family: var(--font-head); }
+
+    /* ── NAVBAR ─────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(11,12,16,0.92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 40px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-family: var(--font-head);
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .logo span { color: var(--accent); }
+
+    .nav-links {
+      display: flex;
+      gap: 32px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-actions { display: flex; gap: 12px; align-items: center; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      text-decoration: none;
+    }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-ghost:hover { border-color: var(--muted); background: var(--surface); }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent2); transform: translateY(-1px); }
+
+    /* ── HERO ───────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      padding: 100px 40px 80px;
+      overflow: hidden;
+    }
+
+    .hero-grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    /* animated background glow */
+    .hero::after {
+      content: '';
+      position: absolute;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(230,57,70,0.12) 0%, transparent 70%);
+      top: -100px; right: -100px;
+      border-radius: 50%;
+      animation: pulse 6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.1); opacity: 0.7; }
+    }
+
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(230,57,70,0.1);
+      border: 1px solid rgba(230,57,70,0.3);
+      color: var(--accent2);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 100px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      font-family: var(--font-head);
+      font-size: clamp(36px, 5vw, 58px);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -2px;
+      margin-bottom: 20px;
+    }
+    .hero h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .hero p {
+      color: var(--muted);
+      font-size: 16px;
+      max-width: 420px;
+      margin-bottom: 32px;
+      line-height: 1.7;
+    }
+
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    /* ── SEARCH BOX (vulnerável) ────────────────────────── */
+    .search-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .search-label {
+      font-family: var(--font-head);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .search-label::before {
+      content: '';
+      width: 8px; height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .search-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .search-input:focus { border-color: var(--accent); }
+    .search-input::placeholder { color: var(--muted); }
+
+    .search-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .2s;
+      white-space: nowrap;
+    }
+    .search-btn:hover { background: var(--accent2); transform: translateY(-1px); }
+
+    /* resultado da busca (XSS output) */
+    .search-result {
+      margin-top: 14px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-radius: 8px;
+      border-left: 3px solid var(--accent);
+      font-size: 14px;
+      display: none;
+      word-break: break-all;
+    }
+    .search-result.show { display: block; }
+
+    /* ── VULNERABILIDADE: Login Form ────────────────────── */
+    .login-section {
+      max-width: 1100px;
+      margin: 60px auto;
+      padding: 0 40px;
+    }
+
+    .section-title {
+      font-family: var(--font-head);
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .login-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px;
+      max-width: 420px;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .form-group input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+
+    .form-hint {
+      font-size: 11px;
+      color: #ff6b6b;
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* ── PRODUCTS GRID ──────────────────────────────────── */
+    .products-section {
+      max-width: 1100px;
+      margin: 0 auto 80px;
+      padding: 0 40px;
+    }
+
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 20px;
+    }
+
+    .product-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: transform .2s, border-color .2s;
+      cursor: pointer;
+    }
+    .product-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--muted);
+    }
+
+    .product-thumb {
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 60px;
+      background: var(--surface);
+    }
+
+    .product-info { padding: 18px; }
+
+    .product-name {
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+    .product-desc {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+    .product-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .product-price {
+      font-family: var(--font-head);
+      font-weight: 800;
+      font-size: 18px;
+      color: var(--gold);
+    }
+    .add-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .add-btn:hover { background: var(--accent2); }
+
+    /* ── VULN BADGE ─────────────────────────────────────── */
+    .vuln-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(230,57,70,0.15);
+      border: 1px solid rgba(230,57,70,0.4);
+      color: var(--accent2);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── FOOTER ─────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    /* ── ANIMATIONS ─────────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .hero-content { animation: fadeUp .7s ease both; }
+    .hero-side    { animation: fadeUp .7s .15s ease both; }
+
+    /* ── RESPONSIVE ─────────────────────────────────────── */
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .nav-links { display: none; }
+      .hero { padding: 60px 20px 40px; }
+      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+      .login-section, .products-section { padding: 0 20px; }
+      footer { flex-direction: column; gap: 12px; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ⚠️ VULNERABILIDADE 1: XSS Refletido via query param 'name' -->
+  <!-- Comentário intencional para ZAP detectar Information Disclosure -->
+  <!-- TODO: remover credenciais de teste admin:techshop2024 -->
+
+  <!-- Banner de alerta XSS -->
+  <div class="vuln-banner" id="xssBanner">
+    <strong>⚠️ XSS Detectado:</strong>
+    <span id="xssOutput"></span>
+  </div>
+
+  <!-- NAVBAR -->
+  <nav>
+    <a class="logo" href="/">Tech<span>Shop</span></a>
+    <ul class="nav-links">
+      <li><a href="#produtos">Produtos</a></li>
+      <li><a href="#login">Login</a></li>
+      <li><a href="#busca">Busca</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a class="btn btn-ghost" href="#login">Entrar</a>
+      <a class="btn btn-primary" href="#produtos">Ver Produtos</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-grid">
+      <div class="hero-content">
+        <div class="hero-tag">🛡️ Estudo de Caso — FIAP</div>
+        <h1>A loja que o<br/><em>ZAP</em> vai<br/>escanear</h1>
+        <p>
+          Aplicação web propositalmente vulnerável para demonstração
+          de análise de segurança com OWASP ZAP CLI no GitHub Actions.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#busca">Testar XSS</a>
+          <a class="btn btn-ghost" href="#login">Ver SQL Injection</a>
+        </div>
+      </div>
+
+      <!-- SEARCH BOX VULNERÁVEL (id=busca) -->
+      <div class="hero-side" id="busca">
+        <div class="search-wrap">
+          <div class="search-label">
+            Busca de Produtos
+            <span class="vuln-badge">⚠️ XSS</span>
+          </div>
+
+          <!-- ⚠️ VULNERABILIDADE: form sem CSRF token, action sem sanitização -->
+          <form id="searchForm" onsubmit="handleSearch(event)">
+            <div class="search-row">
+              <input
+                class="search-input"
+                type="text"
+                id="searchInput"
+                name="q"
+                placeholder="Ex: notebook, smartphone..."
+                autocomplete="off"
+              />
+              <button class="search-btn" type="submit">Buscar</button>
+            </div>
+          </form>
+
+          <!-- Output vulnerável: innerHTML sem sanitização -->
+          <div class="search-result" id="searchResult"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOGIN FORM (SQL Injection simulado) -->
+  <section class="login-section" id="login">
+    <h2 class="section-title">
+      Login de Usuário
+      <span class="vuln-badge">⚠️ SQL Injection</span>
+    </h2>
+
+    <div class="login-card">
+      <!-- ⚠️ VULNERABILIDADE: sem action HTTPS, sem autocomplete=off em password,
+           sem rate limiting, sem CSRF token -->
+      <form id="loginForm" method="GET" action="/login" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="username">Usuário</label>
+          <!-- ⚠️ input não sanitizado, enviado via GET (expõe na URL) -->
+          <input
+            type="text"
+            id="username"
+            name="username"
+            placeholder="admin"
+            value=""
+          />
+          <div class="form-hint">⚠️ Parâmetro enviado via GET (visível na URL)</div>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Senha</label>
+          <!-- ⚠️ password em GET, sem autocomplete=off -->
+          <input
+            type="password"
+            id="password"
+            name="password"
+            placeholder="••••••••"
+          />
+          <div class="form-hint">⚠️ Sem proteção contra força bruta</div>
+        </div>
+
+        <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center;padding:12px;">
+          Entrar
+        </button>
+
+        <!-- ⚠️ VULNERABILIDADE: credenciais hardcoded visíveis no HTML -->
+        <!-- Credenciais de teste: admin / senha123 -->
+      </form>
+    </div>
+  </section>
+
+  <!-- PRODUTOS -->
+  <section class="products-section" id="produtos">
+    <h2 class="section-title">Produtos em Destaque</h2>
+    <div class="products-grid" id="productsGrid"></div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <span>© 2025 TechShop — Aplicação para fins didáticos (FIAP)</span>
+    <span style="color: var(--accent); font-size:12px;">
+      ⚠️ Contém vulnerabilidades intencionais para análise com OWASP ZAP
+    </span>
+  </footer>
+
+  <script>
+    /* ────────────────────────────────────────────────────────
+       ⚠️  VULNERABILIDADE 1 — XSS Refletido
+       O parâmetro ?name= da URL é inserido via innerHTML
+       sem nenhuma sanitização.
+       Teste: ?name=<img src=x onerror=alert(1)>
+    ──────────────────────────────────────────────────────── */
+    (function reflectedXSS() {
+      const params = new URLSearchParams(window.location.search);
+      const name = params.get('name');
+      if (name) {
+        const banner = document.getElementById('xssBanner');
+        const out    = document.getElementById('xssOutput');
+        // ⚠️ innerHTML SEM sanitização — vulnerável a XSS
+        out.innerHTML = 'Olá, ' + name + '! Bem-vindo à TechShop.';
+        banner.classList.add('show');
+      }
+    })();
+
+    /* ────────────────────────────────────────────────────────
+       ⚠️  VULNERABILIDADE 2 — XSS Stored (simulado)
+       O resultado da busca é renderizado via innerHTML
+       sem sanitização do input do usuário.
+    ──────────────────────────────────────────────────────── */
+    function handleSearch(e) {
+      e.preventDefault();
+      const q      = document.getElementById('searchInput').value;
+      const result = document.getElementById('searchResult');
+
+      // ⚠️ innerHTML com input do usuário — vulnerável a XSS
+      result.innerHTML = '🔍 Você buscou por: <strong>' + q + '</strong>';
+      result.classList.add('show');
+
+      // ⚠️ Armazena no localStorage sem criptografia
+      localStorage.setItem('lastSearch', q);
+    }
+
+    /* ────────────────────────────────────────────────────────
+       ⚠️  VULNERABILIDADE 3 — Informações sensíveis no console
+    ──────────────────────────────────────────────────────── */
+    function handleLogin(e) {
+      e.preventDefault();
+      const user = document.getElementById('username').value;
+      const pass = document.getElementById('password').value;
+      // ⚠️ Credenciais logadas no console
+      console.log('[DEBUG] Tentativa de login:', { user, pass });
+      alert('Login simulado! ZAP detectará a ausência de proteções.');
+    }
+
+    /* ────────────────────────────────────────────────────────
+       Renderização dos produtos
+    ──────────────────────────────────────────────────────── */
+    const products = [
+      { emoji: '💻', name: 'Notebook Pro X',    desc: 'Intel i9, 32GB RAM, SSD 1TB', price: 'R$ 8.999' },
+      { emoji: '📱', name: 'Smartphone Ultra',  desc: '5G, 256GB, câmera 200MP',     price: 'R$ 4.499' },
+      { emoji: '🎧', name: 'Headset Gaming',    desc: 'Surround 7.1, sem fio',       price: 'R$ 699'   },
+      { emoji: '🖥️', name: 'Monitor 4K 144Hz', desc: 'IPS, HDR600, 27"',            price: 'R$ 3.199' },
+      { emoji: '⌨️', name: 'Teclado Mecânico', desc: 'Switch Red, RGB, ABNT2',      price: 'R$ 459'   },
+      { emoji: '🖱️', name: 'Mouse Gamer',       desc: '25.600 DPI, 8 botões',        price: 'R$ 349'   },
+      { emoji: '💾', name: 'SSD NVMe 2TB',      desc: '7.000MB/s leitura',           price: 'R$ 1.199' },
+      { emoji: '🔌', name: 'Hub USB-C 10 em 1', desc: 'HDMI 4K, PD 100W',           price: 'R$ 289'   },
+    ];
+
+    const grid = document.getElementById('productsGrid');
+    products.forEach(p => {
+      grid.innerHTML += `
+        <div class="product-card">
+          <div class="product-thumb">${p.emoji}</div>
+          <div class="product-info">
+            <div class="product-name">${p.name}</div>
+            <div class="product-desc">${p.desc}</div>
+            <div class="product-footer">
+              <span class="product-price">${p.price}</span>
+              <button class="add-btn">+ Carrinho</button>
+            </div>
+          </div>
+        </div>`;
+    });
+  </script>
+</body>
+</html>

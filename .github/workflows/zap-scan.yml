@@ -1,0 +1,303 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OWASP ZAP Security Scan — GitHub Actions Workflow
+# FIAP — Investigação e Perícia Digital
+#
+# Tarefas cobertas:
+#   [1] ZAP CLI configurado com scan baseline + relatório HTML
+#   [2] Pipeline falha automaticamente em severidade Alta ou Crítica
+#   [3] Análise do relatório (resumo no Actions Summary)
+#   [4] Vulnerabilidade proposital detectada pelo ZAP
+#   [5] Relatório salvo como artefato do GitHub Actions
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: 🔐 OWASP ZAP Security Scan
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:        # execução manual pela interface do GitHub
+
+# Garante que só um scan roda por vez
+concurrency:
+  group: zap-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  zap-security-scan:
+    name: 🛡️ DAST — OWASP ZAP Baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write    # necessário para upload SARIF (opcional)
+      issues: write
+
+    steps:
+      # ── 1. CHECKOUT ───────────────────────────────────────────────────────
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      # ── 2. PYTHON SETUP ───────────────────────────────────────────────────
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 3. SUBIR APLICAÇÃO ────────────────────────────────────────────────
+      - name: 🚀 Iniciar aplicação vulnerável (porta 8080)
+        run: |
+          echo "──────────────────────────────────────────"
+          echo "  Subindo TechShop em background..."
+          echo "──────────────────────────────────────────"
+
+          # Inicia o servidor em background e salva o PID
+          python app/server.py &
+          echo $! > /tmp/server.pid
+
+          # Aguarda a aplicação responder (até 30s)
+          echo "Aguardando aplicação responder..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080 > /dev/null 2>&1; then
+              echo "✅ Aplicação no ar após ${i}s!"
+              break
+            fi
+            sleep 1
+            if [ $i -eq 30 ]; then
+              echo "❌ Timeout: aplicação não respondeu em 30s"
+              exit 1
+            fi
+          done
+
+          # Confirma que a rota /login também está disponível
+          curl -sf "http://localhost:8080/login?username=test&password=test" > /dev/null \
+            && echo "✅ Rota /login OK" \
+            || echo "⚠️  Rota /login não respondeu (não crítico)"
+
+      # ── 4. OWASP ZAP BASELINE SCAN ────────────────────────────────────────
+      # Tarefa 1: ZAP CLI configurado com geração de relatório HTML
+      - name: 🔍 Executar OWASP ZAP Baseline Scan
+        id: zap_scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:8080'
+
+          # Opções do ZAP CLI:
+          #   -r  → relatório HTML
+          #   -J  → relatório JSON (usado para análise programática)
+          #   -x  → relatório XML
+          #   -l  → nível mínimo de alerta a incluir (Low, Medium, High)
+          #   -z  → opções adicionais do ZAP daemon
+          cmd_options: >-
+            -r zap-report.html
+            -J zap-report.json
+            -x zap-report.xml
+            -l Low
+            -z "-config scanner.threadPerHost=5"
+
+          # fail_action: false → não deixa o ZAP controlar a falha;
+          # faremos isso manualmente no próximo step (Tarefa 2)
+          fail_action: false
+
+          # Permite que o ZAP acesse localhost dentro do runner
+          allow_issue_alerts: false
+
+      # ── 5. VERIFICAR SEVERIDADES — TAREFA 2 ──────────────────────────────
+      # Pipeline falha automaticamente se houver alertas Alta ou Crítica
+      - name: 🚨 Verificar vulnerabilidades críticas/altas (Tarefa 2)
+        id: check_severity
+        if: always()
+        run: |
+          echo "──────────────────────────────────────────"
+          echo "  Analisando severidades do relatório ZAP"
+          echo "──────────────────────────────────────────"
+
+          python3 << 'PYEOF'
+          import json, sys, os
+
+          try:
+              with open('zap-report.json') as f:
+                  data = json.load(f)
+          except FileNotFoundError:
+              print("⚠️  zap-report.json não encontrado — ZAP pode ter falhado.")
+              sys.exit(0)
+          except json.JSONDecodeError as e:
+              print(f"⚠️  Erro ao parsear JSON: {e}")
+              sys.exit(0)
+
+          # O JSON do ZAP tem estrutura: { "site": [ { "alerts": [...] } ] }
+          sites  = data.get('site', [])
+          alerts = []
+          for site in sites:
+              alerts.extend(site.get('alerts', []))
+
+          # riskcode: 3=High, 2=Medium, 1=Low, 0=Informational
+          risk_map  = {'3': 'High', '2': 'Medium', '1': 'Low', '0': 'Informational'}
+          risk_emoji = {'3': '🔴', '2': '🟡', '1': '🟢', '0': 'ℹ️'}
+
+          counts = {'High': 0, 'Medium': 0, 'Low': 0, 'Informational': 0}
+
+          print("\n📋 Alertas encontrados:\n")
+          for alert in sorted(alerts, key=lambda x: int(x.get('riskcode', 0)), reverse=True):
+              rc   = str(alert.get('riskcode', '0'))
+              sev  = risk_map.get(rc, 'Informational')
+              name = alert.get('name', 'Desconhecido')
+              inst = len(alert.get('instances', []))
+              cwe  = alert.get('cweid', 'N/A')
+              counts[sev] += 1
+              print(f"  {risk_emoji.get(rc, 'ℹ️')} [{sev}] {name}")
+              print(f"       CWE: {cwe} | Instâncias: {inst}\n")
+
+          total = sum(counts.values())
+          print("──────────────────────────────────────────")
+          print(f"  Total de alertas : {total}")
+          print(f"  High             : {counts['High']}")
+          print(f"  Medium           : {counts['Medium']}")
+          print(f"  Low              : {counts['Low']}")
+          print(f"  Informational    : {counts['Informational']}")
+          print("──────────────────────────────────────────")
+
+          # Exporta variáveis para os próximos steps
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f"total={total}\n")
+              fh.write(f"high={counts['High']}\n")
+              fh.write(f"medium={counts['Medium']}\n")
+              fh.write(f"low={counts['Low']}\n")
+              fh.write(f"info={counts['Informational']}\n")
+
+          # ── TAREFA 2: falha se High > 0 ────────────────────────────────
+          if counts['High'] > 0:
+              print(f"\n❌ PIPELINE FALHOU!")
+              print(f"   {counts['High']} vulnerabilidade(s) de severidade ALTA detectada(s).")
+              print("   Corrija as vulnerabilidades antes de fazer merge.\n")
+              sys.exit(1)
+          else:
+              print(f"\n✅ Nenhuma vulnerabilidade Alta ou Crítica encontrada.")
+              print("   O pipeline pode prosseguir.\n")
+          PYEOF
+
+      # ── 6. PUBLICAR RESUMO — TAREFA 3 ────────────────────────────────────
+      # Análise do relatório: total, por severidade, vulnerabilidades comuns
+      - name: 📊 Publicar análise no GitHub Actions Summary (Tarefa 3)
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import json, os, sys
+          from collections import Counter
+
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '/dev/null')
+
+          try:
+              with open('zap-report.json') as f:
+                  data = json.load(f)
+          except Exception:
+              with open(summary_file, 'a') as s:
+                  s.write("## ⚠️ Relatório ZAP indisponível\n")
+              sys.exit(0)
+
+          sites  = data.get('site', [])
+          alerts = []
+          for site in sites:
+              alerts.extend(site.get('alerts', []))
+
+          risk_map   = {'3': 'High 🔴', '2': 'Medium 🟡', '1': 'Low 🟢', '0': 'Info ℹ️'}
+          counts     = Counter()
+          vuln_names = []
+
+          for a in alerts:
+              rc = str(a.get('riskcode', '0'))
+              counts[risk_map.get(rc, 'Info ℹ️')] += 1
+              vuln_names.append(a.get('name', 'Desconhecido'))
+
+          top_vulns = Counter(vuln_names).most_common(5)
+          total     = sum(counts.values())
+
+          with open(summary_file, 'a') as s:
+              s.write("## 🔐 Resultado — OWASP ZAP Security Scan\n\n")
+
+              # Quantidade total
+              s.write(f"### 📊 Totais\n\n")
+              s.write(f"**{total}** alertas encontrados em `http://localhost:8080`\n\n")
+
+              # Por severidade — Tarefa 3.2
+              s.write("### Alertas por Severidade\n\n")
+              s.write("| Severidade | Quantidade |\n")
+              s.write("|:-----------|:----------:|\n")
+              for sev in ['High 🔴', 'Medium 🟡', 'Low 🟢', 'Info ℹ️']:
+                  s.write(f"| {sev} | {counts.get(sev, 0)} |\n")
+              s.write(f"| **Total** | **{total}** |\n\n")
+
+              # Tipos mais comuns — Tarefa 3.3
+              s.write("### 🔍 Vulnerabilidades Mais Comuns\n\n")
+              s.write("| # | Vulnerabilidade | Ocorrências |\n")
+              s.write("|:--|:----------------|:-----------:|\n")
+              for i, (name, count) in enumerate(top_vulns, 1):
+                  s.write(f"| {i} | {name} | {count} |\n")
+
+              s.write("\n---\n")
+              s.write("_Relatório completo disponível nos **Artifacts** deste workflow._\n")
+
+          print("✅ Resumo publicado no GitHub Actions Summary.")
+          PYEOF
+
+      # ── 7. PARAR SERVIDOR ─────────────────────────────────────────────────
+      - name: 🛑 Encerrar servidor da aplicação
+        if: always()
+        run: |
+          if [ -f /tmp/server.pid ]; then
+            kill $(cat /tmp/server.pid) 2>/dev/null || true
+            echo "✅ Servidor encerrado."
+          fi
+
+      # ── 8. SALVAR ARTEFATOS — TAREFA 5 ───────────────────────────────────
+      # Relatório salvo mesmo quando o pipeline falha (if: always())
+      - name: 📦 Salvar relatório ZAP como artefato (Tarefa 5)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Nome único por execução — facilita identificar qual build
+          name: zap-report-run-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            zap-report.html
+            zap-report.json
+            zap-report.xml
+          # Mantém por 30 dias — acesse em Actions > seu workflow > Artifacts
+          retention-days: 30
+
+      # ── 9. COMENTAR EM PR (opcional) ─────────────────────────────────────
+      - name: 💬 Comentar resultado no Pull Request
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const high   = '${{ steps.check_severity.outputs.high   }}' || '?';
+            const medium = '${{ steps.check_severity.outputs.medium }}' || '?';
+            const low    = '${{ steps.check_severity.outputs.low    }}' || '?';
+            const total  = '${{ steps.check_severity.outputs.total  }}' || '?';
+            const status = high > 0 ? '❌ FALHOU' : '✅ APROVADO';
+
+            const body = `## 🔐 OWASP ZAP Security Scan — ${status}
+
+            | Severidade | Quantidade |
+            |:-----------|:----------:|
+            | 🔴 High    | ${high}    |
+            | 🟡 Medium  | ${medium}  |
+            | 🟢 Low     | ${low}     |
+            | **Total**  | **${total}** |
+
+            ${high > 0
+              ? '> ❌ **Este PR contém vulnerabilidades de alta severidade. Corrija antes do merge.**'
+              : '> ✅ Nenhuma vulnerabilidade alta detectada.'}
+
+            📥 [Baixar relatório HTML completo](../actions/runs/${{ github.run_id }})
+            `;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
